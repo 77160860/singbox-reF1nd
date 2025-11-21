@@ -5,8 +5,14 @@ on:
     inputs:
       version:
         description: 'sing-box version (tag/branch) to build'
+        type: string
         required: false
         default: 'reF1nd-main'
+      force:
+        description: 'Force rebuild even if unchanged'
+        type: boolean
+        required: false
+        default: false
   schedule:
     - cron: '0 0 * * *'
   repository_dispatch:
@@ -31,10 +37,16 @@ jobs:
           else
             REF="reF1nd-main"
           fi
+          FORCE="false"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force }}" = "true" ]; then
+            FORCE="true"
+          fi
           echo "UPSTREAM_REPO=$UPSTREAM_REPO" >> "$GITHUB_ENV"
           echo "REF=$REF" >> "$GITHUB_ENV"
+          echo "FORCE=$FORCE" >> "$GITHUB_ENV"
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
           echo "upstream_repo=$UPSTREAM_REPO" >> "$GITHUB_OUTPUT"
+          echo "force=$FORCE" >> "$GITHUB_OUTPUT"
 
       - name: Resolve upstream commit SHA
         id: upstream
@@ -67,6 +79,11 @@ jobs:
         id: decide
         shell: bash
         run: |
+          if [ "$FORCE" = "true" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Manual force build requested."
+            exit 0
+          fi
           mkdir -p "upstream_state/${REF}"
           PREV=""
           [ -f "upstream_state/${REF}/sha.txt" ] && PREV=$(cat "upstream_state/${REF}/sha.txt")
@@ -129,22 +146,22 @@ jobs:
           LDFLAGS_EXTRA=""
           add_flag() { LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X \$1=\$2"; }
           if [ -d cmd/internal/build ]; then
-            if grep -R -q -E 'var[[:space:]]+Version\b' cmd/internal/build; then
+            if grep -R -q -E 'var[[:space:]]+Version[[:space:]]+string' cmd/internal/build; then
               add_flag "${PKG_BUILD}.Version" "${VERSION}"
             fi
-            if grep -R -q -E 'var[[:space:]]]+GitCommit\b' cmd/internal/build; then
+            if grep -R -q -E 'var[[:space:]]+GitCommit[[:space:]]+string' cmd/internal/build; then
               add_flag "${PKG_BUILD}.GitCommit" "${SHORT_SHA}"
-            elif grep -R -q -E 'var[[:space:]]]+Commit\b' cmd/internal/build; then
+            elif grep -R -q -E 'var[[:space:]]+Commit[[:space:]]+string' cmd/internal/build; then
               add_flag "${PKG_BUILD}.Commit" "${SHORT_SHA}"
             fi
-            if grep -R -q -E 'var[[:space:]]]+BuildTime\b' cmd/internal/build; then
+            if grep -R -q -E 'var[[:space:]]+BuildTime[[:space:]]+string' cmd/internal/build; then
               add_flag "${PKG_BUILD}.BuildTime" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            elif grep -R -q -E 'var[[:space:]]]+BuildDate\b' cmd/internal/build; then
+            elif grep -R -q -E 'var[[:space:]]+BuildDate[[:space:]]+string' cmd/internal/build; then
               add_flag "${PKG_BUILD}.BuildDate" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             fi
           fi
           if [ -z "$LDFLAGS_EXTRA" ] && [ -d constant ]; then
-            if grep -R -q -E 'var[[:space:]]+Version\b' constant; then
+            if grep -R -q -E 'var[[:space:]]+Version[[:space:]]+string' constant; then
               add_flag "${PKG_CONST}.Version" "${VERSION}"
             fi
           fi
