@@ -110,18 +110,8 @@ jobs:
         id: meta
         shell: bash
         run: |
-          # 优先从源码解析 vX.Y.Z（CoreVersion/Version）
-          VERSION=$(grep -R -h -E '(const|var)[[:space:]]+(CoreVersion|Version)[[:space:]]*=[[:space:]]*"(v[0-9]+\.[0-9]+\.[0-9][^"]*)"' --include="*.go" . 2>/dev/null | head -n1 | sed -E 's/.*"(v[^"]+)".*/\1/') || true
-          # 若未解析到，则取最近 tag
-          if [ -z "$VERSION" ]; then
-            git fetch --tags --force --prune || true
-            git fetch --depth=0 origin || true
-            VERSION=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)
-          fi
-          # 再不行，退回分支名
-          if [ -z "$VERSION" ]; then
-            VERSION="${REF}"
-          fi
+          # 固定版本号为 reF1nd
+          VERSION="reF1nd"
           OUT="sing-box-linux-arm64-${VERSION}-${SHORT_SHA}"
           ZIP="${OUT}.zip"
           TAG="sing-box-${VERSION}-${SHORT_SHA}"
@@ -133,47 +123,6 @@ jobs:
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
           echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-      - name: Detect ldflags
-        if: steps.decide.outputs.changed == 'true'
-        id: ldflags
-        shell: bash
-        run: |
-          set -e
-          MODULE=$(go list -m)
-          PKG_BUILD="$MODULE/cmd/internal/build"
-          PKG_CONST="$MODULE/constant"
-          LDFLAGS_EXTRA=""
-          # 仅在存在 var 时注入，避免覆盖源码中的 const 版本
-          if [ -d constant ]; then
-            if grep -R -q -E 'var[[:space:]]+CoreVersion\b' constant; then
-              LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_CONST}.CoreVersion=${VERSION}"
-            fi
-            if grep -R -q -E 'var[[:space:]]+Version\b' constant; then
-              LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_CONST}.Version=${VERSION}"
-            fi
-          fi
-          if [ -d cmd/internal/build ]; then
-            if grep -R -q -E 'var[[:space:]]+Version\b' cmd/internal/build; then
-              LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_BUILD}.Version=${VERSION}"
-            fi
-            if grep -R -q -E 'var[[:space:]]+(GitCommit|Commit)\b' cmd/internal/build; then
-              if grep -R -q -E 'var[[:space:]]+GitCommit\b' cmd/internal/build; then
-                LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_BUILD}.GitCommit=${SHORT_SHA}"
-              else
-                LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_BUILD}.Commit=${SHORT_SHA}"
-              fi
-            fi
-            if grep -R -q -E 'var[[:space:]]+(BuildTime|BuildDate)\b' cmd/internal/build; then
-              BUILD_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-              if grep -R -q -E 'var[[:space:]]+BuildTime\b' cmd/internal/build; then
-                LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_BUILD}.BuildTime=${BUILD_TS}"
-              else
-                LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_BUILD}.BuildDate=${BUILD_TS}"
-              fi
-            fi
-          fi
-          echo "LDFLAGS_EXTRA=${LDFLAGS_EXTRA}" >> "$GITHUB_ENV"
-          echo "ldflags=${LDFLAGS_EXTRA}" >> "$GITHUB_OUTPUT"
       - name: Build sing-box for arm64
         if: steps.decide.outputs.changed == 'true'
         env:
@@ -181,7 +130,8 @@ jobs:
           GOOS: linux
           GOARCH: arm64
         run: |
-          go build -v -o "${OUT}" -trimpath -ldflags="-s -w ${LDFLAGS_EXTRA}" -tags="with_quic with_clash_api" ./cmd/sing-box
+          # 移除所有 ldflags 版本注入，仅保留基础优化
+          go build -v -o "${OUT}" -trimpath -ldflags="-s -w" -tags="with_quic with_clash_api" ./cmd/sing-box
       - name: Package zip
         if: steps.decide.outputs.changed == 'true'
         shell: bash
@@ -197,7 +147,7 @@ jobs:
         if: steps.decide.outputs.changed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: sing-box-minimal-${{ steps.meta.outputs.version }}-arm64-${{ steps.upstream.outputs.short }}-zip
+          name: sing-box-minimal-reF1nd-arm64-${{ steps.upstream.outputs.short }}-zip
           path: |
             ${{ steps.meta.outputs.zip }}
             ${{ steps.meta.outputs.zip }}.sha256
@@ -206,12 +156,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          name: sing-box minimal ${{ steps.meta.outputs.version }} (${{ steps.upstream.outputs.short }})
+          name: sing-box minimal reF1nd (${{ steps.upstream.outputs.short }})
           body: |
-            - Source: reF1nd/sing-box @ ${{ steps.meta.outputs.version }} (${{ steps.upstream.outputs.short }})
+            - Source: reF1nd/sing-box @ ${{ steps.upstream.outputs.short }}
+            - Version: reF1nd (fixed)
             - GOOS/GOARCH: linux/arm64
             - Tags: with_quic with_clash_api
-            - ldflags: ${{ steps.ldflags.outputs.ldflags }}
+            - Build: Minimal static binary
           prerelease: true
           files: |
             ${{ steps.meta.outputs.zip }}
