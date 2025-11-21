@@ -5,14 +5,8 @@ on:
     inputs:
       version:
         description: 'sing-box version (tag/branch) to build'
-        type: string
         required: false
         default: 'reF1nd-main'
-      force:
-        description: 'Force rebuild even if unchanged'
-        type: boolean
-        required: false
-        default: false
   schedule:
     - cron: '0 0 * * *'
   repository_dispatch:
@@ -37,53 +31,40 @@ jobs:
           else
             REF="reF1nd-main"
           fi
-          FORCE="false"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force }}" = "true" ]; then
-            FORCE="true"
-          fi
           echo "UPSTREAM_REPO=$UPSTREAM_REPO" >> "$GITHUB_ENV"
-          echo "REF=$REF" >> "$GITHUB_ENV"
-          echo "FORCE=$FORCE" >> "$GITHUB_ENV"
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          echo "upstream_repo=$UPSTREAM_REPO" >> "$GITHUB_OUTPUT"
-          echo "force=$FORCE" >> "$GITHUB_OUTPUT"
+          echo "REF=$REF"                     >> "$GITHUB_ENV"
 
       - name: Resolve upstream commit SHA
         id: upstream
         shell: bash
         run: |
           set -e
-          SHA=$(git ls-remote --exit-code --heads "${{ steps.prep.outputs.upstream_repo }}" "refs/heads/${REF}" | cut -f1) || true
+          SHA=$(git ls-remote --exit-code --heads "$UPSTREAM_REPO" "refs/heads/${REF}" | cut -f1) || true
           if [ -z "$SHA" ]; then
-            SHA=$(git ls-remote --exit-code --tags "${{ steps.prep.outputs.upstream_repo }}" "refs/tags/${REF}^{}" | cut -f1) || true
+            SHA=$(git ls-remote --exit-code --tags "$UPSTREAM_REPO" "refs/tags/${REF}^{}" | cut -f1) || true
           fi
           if [ -z "$SHA" ]; then
-            SHA=$(git ls-remote "${{ steps.prep.outputs.upstream_repo }}" HEAD | cut -f1)
+            SHA=$(git ls-remote "$UPSTREAM_REPO" HEAD | cut -f1)
           fi
           SHORT_SHA="${SHA:0:7}"
-          echo "UPSTREAM_SHA=$SHA" >> "$GITHUB_ENV"
+          echo "UPSTREAM_SHA=$SHA"    >> "$GITHUB_ENV"
           echo "SHORT_SHA=$SHORT_SHA" >> "$GITHUB_ENV"
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          echo "short=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA"             >> "$GITHUB_OUTPUT"
+          echo "short=$SHORT_SHA"     >> "$GITHUB_OUTPUT"
 
       - name: Restore last processed state
         id: cache-restore
         uses: actions/cache/restore@v3
         with:
-          path: upstream_state/${{ steps.prep.outputs.ref }}
-          key: singbox-state-${{ steps.prep.outputs.ref }}-${{ steps.upstream.outputs.sha }}
+          path: upstream_state/${{ env.REF }}
+          key: singbox-state-${{ env.REF }}-${{ env.UPSTREAM_SHA }}
           restore-keys: |
-            singbox-state-${{ steps.prep.outputs.ref }}-
+            singbox-state-${{ env.REF }}-
 
       - name: Decide if build is needed
         id: decide
         shell: bash
         run: |
-          if [ "$FORCE" = "true" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Manual force build requested."
-            exit 0
-          fi
           mkdir -p "upstream_state/${REF}"
           PREV=""
           [ -f "upstream_state/${REF}/sha.txt" ] && PREV=$(cat "upstream_state/${REF}/sha.txt")
@@ -100,7 +81,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: reF1nd/sing-box
-          ref: ${{ steps.upstream.outputs.sha }}
+          ref: ${{ env.UPSTREAM_SHA }}
           fetch-depth: 1
 
       - name: Set up Go
@@ -109,90 +90,62 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Derive version and names (via git tags)
+      - name: Derive versioned names
         if: steps.decide.outputs.changed == 'true'
         id: meta
         shell: bash
         run: |
-          set -e
-          VERSION=""
-          # 1) 当前提交对应的 tag（兼容轻量/注解 tag）
-          VERSION=$(git ls-remote --tags "${{ steps.prep.outputs.upstream_repo }}" \
-            | awk -v sha="${UPSTREAM_SHA}" '$1==sha{print $2}' \
-            | sed -E 's|refs/tags/||; s|\^\{\}||' \
-            | head -n1)
-          # 2) 无精确匹配则取仓库最新 v* tag
-          if [ -z "$VERSION" ]; then
-            VERSION=$(git ls-remote --tags "${{ steps.prep.outputs.upstream_repo }}" 'refs/tags/v*' \
-              | awk '{print $2}' \
-              | sed -E 's|refs/tags/||; s|\^\{\}||' \
-              | sort -V | tail -n1)
-          fi
-          # 3) 仍未获取到则回退到分支/输入
-          if [ -z "$VERSION" ]; then
-            VERSION="${REF}"
-          fi
-
+          VERSION="${REF}"
           OUT="sing-box-linux-arm64-${VERSION}-${SHORT_SHA}"
-          ZIP="${OUT}.zip"
           TAG="sing-box-${VERSION}-${SHORT_SHA}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "OUT=$OUT" >> "$GITHUB_ENV"
-          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
-          echo "TAG=$TAG" >> "$GITHUB_ENV"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "OUT=$OUT"         >> "$GITHUB_ENV"
+          echo "TAG=$TAG"         >> "$GITHUB_ENV"
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
-          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Detect ldflags
+      - name: Detect version vars and compose ldflags
         if: steps.decide.outputs.changed == 'true'
         id: ldflags
         shell: bash
         run: |
           set -e
-          MODULE=$(go list -m)
+          MODULE=$(go list -m -f '{{.Path}}')
           PKG_BUILD="$MODULE/cmd/internal/build"
           PKG_CONST="$MODULE/constant"
           LDFLAGS_EXTRA=""
-
-          # 仅在变量存在时注入，避免覆盖源码 const
-          if [ -d constant ]; then
-            # 优先注入 constant.Version（官方内核使用）
-            if grep -R -q -E 'var[[:space:]]+Version\b' constant; then
-              LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_CONST}.Version=${VERSION}"
-            fi
-            # 兼容某些分支使用 CoreVersion
-            if grep -R -q -E 'var[[:space:]]+CoreVersion\b' constant; then
-              LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_CONST}.CoreVersion=${VERSION}"
-            fi
-          fi
-
+          add_flag() { LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X \$1=\$2"; }
           if [ -d cmd/internal/build ]; then
-            if grep -R -q -E 'var[[:space:]]+Version\b' cmd/internal/build; then
-              LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_BUILD}.Version=${VERSION}"
+            if grep -R -q -E 'var[[:space:]]+Version[[:space:]]+string' cmd/internal/build; then
+              add_flag "${PKG_BUILD}.Version" "${VERSION}"
             fi
-            if grep -R -q -E 'var[[:space:]]+(GitCommit|Commit)\b' cmd/internal/build; then
-              if grep -R -q -E 'var[[:space:]]+GitCommit\b' cmd/internal/build; then
-                LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_BUILD}.GitCommit=${SHORT_SHA}"
+            if grep -R -q -E 'var[[:space:]]+(Commit|GitCommit)[[:space:]]+string' cmd/internal/build; then
+              if grep -R -q -E 'var[[:space:]]+Commit[[:space:]]+string' cmd/internal/build; then
+                add_flag "${PKG_BUILD}.Commit" "${SHORT_SHA}"
               else
-                LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_BUILD}.Commit=${SHORT_SHA}"
+                add_flag "${PKG_BUILD}.GitCommit" "${SHORT_SHA}"
               fi
             fi
-            if grep -R -q -E 'var[[:space:]]+(BuildTime|BuildDate)\b' cmd/internal/build; then
-              BUILD_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-              if grep -R -q -E 'var[[:space:]]+BuildTime\b' cmd/internal/build; then
-                LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_BUILD}.BuildTime=${BUILD_TS}"
+            if grep -R -q -E 'var[[:space:]]+(BuildTime|BuildDate)[[:space:]]+string' cmd/internal/build; then
+              BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              if grep -R -q -E 'var[[:space:]]+BuildTime[[:space:]]+string' cmd/internal/build; then
+                add_flag "${PKG_BUILD}.BuildTime" "${BUILD_TIME}"
               else
-                LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_BUILD}.BuildDate=${BUILD_TS}"
+                add_flag "${PKG_BUILD}.BuildDate" "${BUILD_TIME}"
               fi
             fi
           fi
-
-          # 与本地一致，去除 buildid 便于复现
-          echo 'LDFLAGS_BASE=-s -w -buildid=' >> "$GITHUB_ENV"
-          echo "LDFLAGS_EXTRA=${LDFLAGS_EXTRA}" >> "$GITHUB_ENV"
-          echo "ldflags=${LDFLAGS_EXTRA}" >> "$GITHUB_OUTPUT"
+          if [ -z "$LDFLAGS_EXTRA" ] && [ -d constant ]; then
+            if grep -R -q -E 'var[[:space:]]+(Version|CoreVersion)[[:space:]]+string' constant; then
+              if grep -R -q -E 'var[[:space:]]+Version[[:space:]]+string' constant; then
+                add_flag "${PKG_CONST}.Version" "${VERSION}"
+              else
+                add_flag "${PKG_CONST}.CoreVersion" "${VERSION}"
+              fi
+            fi
+          fi
+          echo "LDFLAGS_EXTRA=$LDFLAGS_EXTRA" >> "$GITHUB_ENV"
+          echo "ldflags=$LDFLAGS_EXTRA" >> "$GITHUB_OUTPUT"
 
       - name: Build sing-box for arm64
         if: steps.decide.outputs.changed == 'true'
@@ -201,45 +154,40 @@ jobs:
           GOOS: linux
           GOARCH: arm64
         run: |
-          go build -v -o "${OUT}" -trimpath -ldflags "${LDFLAGS_BASE} ${LDFLAGS_EXTRA}" -tags "with_quic with_clash_api" ./cmd/sing-box
-
-      - name: Package zip
-        if: steps.decide.outputs.changed == 'true'
-        shell: bash
-        run: |
-          install -m 0755 "${OUT}" sing-box
-          zip -9 -j "${ZIP}" sing-box
-          rm -f sing-box
+          go build -v -o "${OUT}" -trimpath \
+            -ldflags="-s -w ${LDFLAGS_EXTRA}" \
+            -tags="with_quic with_clash_api" \
+            ./cmd/sing-box
 
       - name: Generate checksums
         if: steps.decide.outputs.changed == 'true'
         run: |
-          sha256sum "${ZIP}" > "${ZIP}.sha256"
+          sha256sum "${OUT}" > "${OUT}.sha256"
 
-      - name: Upload Artifact
+      - name: Upload Artifact (optional)
         if: steps.decide.outputs.changed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: sing-box-minimal-${{ steps.meta.outputs.version }}-arm64-${{ steps.upstream.outputs.short }}-zip
+          name: sing-box-minimal-${{ env.VERSION }}-arm64-${{ env.SHORT_SHA }}
           path: |
-            ${{ steps.meta.outputs.zip }}
-            ${{ steps.meta.outputs.zip }}.sha256
+            ${{ env.OUT }}
+            ${{ env.OUT }}.sha256
 
       - name: Create GitHub Release and upload assets
         if: steps.decide.outputs.changed == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          name: sing-box minimal ${{ steps.meta.outputs.version }} (${{ steps.upstream.outputs.short }})
+          tag_name: ${{ env.TAG }}
+          name: sing-box minimal ${{ env.VERSION }} (${{ env.SHORT_SHA }})
           body: |
-            - Source: reF1nd/sing-box @ ${{ steps.meta.outputs.version }} (${{ steps.upstream.outputs.short }})
+            - Source: reF1nd/sing-box @ ${{ env.VERSION }} (${{ env.SHORT_SHA }})
             - GOOS/GOARCH: linux/arm64
             - Tags: with_quic with_clash_api
             - ldflags: ${{ steps.ldflags.outputs.ldflags }}
           prerelease: true
           files: |
-            ${{ steps.meta.outputs.zip }}
-            ${{ steps.meta.outputs.zip }}.sha256
+            ${{ env.OUT }}
+            ${{ env.OUT }}.sha256
 
       - name: Update state and save cache
         if: steps.decide.outputs.changed == 'true'
@@ -252,5 +200,5 @@ jobs:
         if: steps.decide.outputs.changed == 'true'
         uses: actions/cache/save@v3
         with:
-          path: upstream_state/${{ steps.prep.outputs.ref }}
-          key: singbox-state-${{ steps.prep.outputs.ref }}-${{ steps.upstream.outputs.sha }}
+          path: upstream_state/${{ env.REF }}
+          key: singbox-state-${{ env.REF }}-${{ env.UPSTREAM_SHA }}
