@@ -1,0 +1,46 @@
+name: 
+
+on:
+workflow_dispatch:
+inputs:
+version:
+description: 'sing-box version (tag/branch) to build'
+required: true
+default: 'reF1nd-main'
+
+jobs:
+build:
+runs-on: 
+steps:
+# 拉取官方 sing-box 仓库的代码
+- name: 
+uses: 
+with:
+repository: 'reF1nd/sing-box'
+ref: {{}}
+
+# 设置 Go 语言环境
+- name: 
+uses: 
+with:
+go-version: '1.22'
+
+# 编译 arm64 核心
+- name: 
+env:
+CGO_ENABLED: 0
+GOOS: 
+GOARCH: 
+run: |
+# 编译命令，tags 中只保留了 with_quic 和 with_clash_api
+go build -v -o sing-box-linux-arm64 -trimpath \
+"-s -w"
+"with_quic with_clash_api"
+./cmd/sing-box
+
+# 上传编译产物
+- name: 
+uses: 
+with:
+name: {{}}
+path: 
