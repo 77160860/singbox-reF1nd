@@ -5,60 +5,167 @@ on:
     inputs:
       version:
         description: 'sing-box version (tag/branch) to build'
-        required: true
+        required: false
         default: 'reF1nd-main'
+  schedule:
+    - cron: '0 0 * * *'
+  repository_dispatch:
+    types: [singbox_push]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
-      - name: Checkout official sing-box repository
+      - name: Prepare context
+        id: prep
+        shell: bash
+        run: |
+          UPSTREAM_REPO="https://github.com/reF1nd/sing-box.git"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            REF="${{ github.event.inputs.version }}"
+          elif [ "${{ github.event_name }}" = "repository_dispatch" ] && [ -n "${{ github.event.client_payload.version }}" ]; then
+            REF="${{ github.event.client_payload.version }}"
+          else
+            REF="reF1nd-main"
+          fi
+          echo "UPSTREAM_REPO=$UPSTREAM_REPO" >> "$GITHUB_ENV"
+          echo "REF=$REF"                     >> "$GITHUB_ENV"
+
+      - name: Resolve upstream commit SHA
+        id: upstream
+        shell: bash
+        run: |
+          set -e
+          SHA=$(git ls-remote --exit-code --heads "$UPSTREAM_REPO" "refs/heads/${REF}" | awk '{print \$1}') || true
+          if [ -z "$SHA" ]; then
+            SHA=$(git ls-remote --exit-code --tags "$UPSTREAM_REPO" "refs/tags/${REF}^{}" | awk '{print \$1}') || true
+          fi
+          if [ -z "$SHA" ]; then
+            SHA=$(git ls-remote "$UPSTREAM_REPO" HEAD | awk '{print \$1}')
+          fi
+          SHORT_SHA="${SHA:0:7}"
+          echo "UPSTREAM_SHA=$SHA"    >> "$GITHUB_ENV"
+          echo "SHORT_SHA=$SHORT_SHA" >> "$GITHUB_ENV"
+          echo "sha=$SHA"             >> "$GITHUB_OUTPUT"
+          echo "short=$SHORT_SHA"     >> "$GITHUB_OUTPUT"
+
+      - name: Restore last processed state
+        id: cache-restore
+        uses: actions/cache/restore@v3
+        with:
+          path: upstream_state/${{ env.REF }}
+          key: singbox-state-${{ env.REF }}-${{ env.UPSTREAM_SHA }}
+          restore-keys: |
+            singbox-state-${{ env.REF }}-
+
+      - name: Decide if build is needed
+        id: decide
+        shell: bash
+        run: |
+          mkdir -p "upstream_state/${REF}"
+          PREV=""
+          [ -f "upstream_state/${REF}/sha.txt" ] && PREV=$(cat "upstream_state/${REF}/sha.txt")
+          if [ "$PREV" = "${UPSTREAM_SHA}" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No upstream changes. Skipping build."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Upstream changed from '$PREV' to '${UPSTREAM_SHA}'. Building..."
+          fi
+
+      - name: Checkout official sing-box repository at resolved commit
+        if: steps.decide.outputs.changed == 'true'
         uses: actions/checkout@v4
         with:
           repository: reF1nd/sing-box
-          ref: ${{ github.event.inputs.version }}
+          ref: ${{ env.UPSTREAM_SHA }}
           fetch-depth: 1
 
       - name: Set up Go
+        if: steps.decide.outputs.changed == 'true'
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
 
       - name: Derive versioned names
+        if: steps.decide.outputs.changed == 'true'
         id: meta
         shell: bash
         run: |
-          VERSION="${{ github.event.inputs.version }}"
-          SHORT_SHA="$(git rev-parse --short HEAD)"
+          VERSION="${REF}"
           OUT="sing-box-linux-arm64-${VERSION}-${SHORT_SHA}"
           TAG="sing-box-${VERSION}-${SHORT_SHA}"
-
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "SHORT_SHA=$SHORT_SHA" >> "$GITHUB_ENV"
-          echo "OUT=$OUT" >> "$GITHUB_ENV"
-          echo "TAG=$TAG" >> "$GITHUB_ENV"
-
+          echo "OUT=$OUT"         >> "$GITHUB_ENV"
+          echo "TAG=$TAG"         >> "$GITHUB_ENV"
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Detect version vars and compose ldflags
+        if: steps.decide.outputs.changed == 'true'
+        id: ldflags
+        shell: bash
+        run: |
+          set -e
+          MODULE=$(go list -m -f '{{.Path}}')
+          PKG_BUILD="$MODULE/cmd/internal/build"
+          PKG_CONST="$MODULE/constant"
+          LDFLAGS_EXTRA=""
+          add_flag() { LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X \$1=\$2"; }
+          if [ -d cmd/internal/build ]; then
+            if grep -R -q -E 'var[[:space:]]+Version[[:space:]]+string' cmd/internal/build; then
+              add_flag "${PKG_BUILD}.Version" "${VERSION}"
+            fi
+            if grep -R -q -E 'var[[:space:]]+(Commit|GitCommit)[[:space:]]+string' cmd/internal/build; then
+              if grep -R -q -E 'var[[:space:]]+Commit[[:space:]]+string' cmd/internal/build; then
+                add_flag "${PKG_BUILD}.Commit" "${SHORT_SHA}"
+              else
+                add_flag "${PKG_BUILD}.GitCommit" "${SHORT_SHA}"
+              fi
+            fi
+            if grep -R -q -E 'var[[:space:]]+(BuildTime|BuildDate)[[:space:]]+string' cmd/internal/build; then
+              BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              if grep -R -q -E 'var[[:space:]]+BuildTime[[:space:]]+string' cmd/internal/build; then
+                add_flag "${PKG_BUILD}.BuildTime" "${BUILD_TIME}"
+              else
+                add_flag "${PKG_BUILD}.BuildDate" "${BUILD_TIME}"
+              fi
+            fi
+          fi
+          if [ -z "$LDFLAGS_EXTRA" ] && [ -d constant ]; then
+            if grep -R -q -E 'var[[:space:]]+(Version|CoreVersion)[[:space:]]+string' constant; then
+              if grep -R -q -E 'var[[:space:]]+Version[[:space:]]+string' constant; then
+                add_flag "${PKG_CONST}.Version" "${VERSION}"
+              else
+                add_flag "${PKG_CONST}.CoreVersion" "${VERSION}"
+              fi
+            fi
+          fi
+          echo "LDFLAGS_EXTRA=$LDFLAGS_EXTRA" >> "$GITHUB_ENV"
+          echo "ldflags=$LDFLAGS_EXTRA" >> "$GITHUB_OUTPUT"
+
       - name: Build sing-box for arm64
+        if: steps.decide.outputs.changed == 'true'
         env:
           CGO_ENABLED: 0
           GOOS: linux
           GOARCH: arm64
         run: |
           go build -v -o "${OUT}" -trimpath \
-            -ldflags="-s -w" \
+            -ldflags="-s -w ${LDFLAGS_EXTRA}" \
             -tags="with_quic with_clash_api" \
             ./cmd/sing-box
 
       - name: Generate checksums
+        if: steps.decide.outputs.changed == 'true'
         run: |
           sha256sum "${OUT}" > "${OUT}.sha256"
 
       - name: Upload Artifact (optional)
+        if: steps.decide.outputs.changed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: sing-box-minimal-${{ env.VERSION }}-arm64-${{ env.SHORT_SHA }}
@@ -67,6 +174,7 @@ jobs:
             ${{ env.OUT }}.sha256
 
       - name: Create GitHub Release and upload assets
+        if: steps.decide.outputs.changed == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
@@ -75,7 +183,22 @@ jobs:
             - Source: reF1nd/sing-box @ ${{ env.VERSION }} (${{ env.SHORT_SHA }})
             - GOOS/GOARCH: linux/arm64
             - Tags: with_quic with_clash_api
+            - ldflags: ${{ steps.ldflags.outputs.ldflags }}
           prerelease: true
           files: |
             ${{ env.OUT }}
             ${{ env.OUT }}.sha256
+
+      - name: Update state and save cache
+        if: steps.decide.outputs.changed == 'true'
+        shell: bash
+        run: |
+          mkdir -p "upstream_state/${REF}"
+          echo "${UPSTREAM_SHA}" > "upstream_state/${REF}/sha.txt"
+
+      - name: Save cache
+        if: steps.decide.outputs.changed == 'true'
+        uses: actions/cache/save@v3
+        with:
+          path: upstream_state/${{ env.REF }}
+          key: singbox-state-${{ env.REF }}-${{ env.UPSTREAM_SHA }}
