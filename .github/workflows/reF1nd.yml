@@ -92,12 +92,19 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Derive versioned names
+      - name: Derive version and names
         if: steps.decide.outputs.changed == 'true'
         id: meta
         shell: bash
         run: |
-          VERSION="${REF}"
+          git fetch --tags --force --prune || true
+          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -z "$VERSION" ]; then
+            VERSION=$(grep -R -h -E 'Version[[:space:]]*=[[:space:]]*"v[0-9]+\.[0-9]+\.[0-9]+"' constant cmd/internal/build 2>/dev/null | head -n1 | sed -E 's/.*"([^"]+)".*/\1/') || true
+          fi
+          if [ -z "$VERSION" ]; then
+            VERSION="${REF}"
+          fi
           OUT="sing-box-linux-arm64-${VERSION}-${SHORT_SHA}"
           ZIP="${OUT}.zip"
           TAG="sing-box-${VERSION}-${SHORT_SHA}"
@@ -110,7 +117,7 @@ jobs:
           echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Detect version vars and compose ldflags
+      - name: Detect ldflags
         if: steps.decide.outputs.changed == 'true'
         id: ldflags
         shell: bash
@@ -122,32 +129,23 @@ jobs:
           LDFLAGS_EXTRA=""
           add_flag() { LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X \$1=\$2"; }
           if [ -d cmd/internal/build ]; then
-            if grep -R -q -E 'var[[:space:]]+Version[[:space:]]+string' cmd/internal/build; then
+            if grep -R -q -E 'var[[:space:]]+Version\b' cmd/internal/build; then
               add_flag "${PKG_BUILD}.Version" "${VERSION}"
             fi
-            if grep -R -q -E 'var[[:space:]]+(Commit|GitCommit)[[:space:]]+string' cmd/internal/build; then
-              if grep -R -q -E 'var[[:space:]]+Commit[[:space:]]+string' cmd/internal/build; then
-                add_flag "${PKG_BUILD}.Commit" "${SHORT_SHA}"
-              else
-                add_flag "${PKG_BUILD}.GitCommit" "${SHORT_SHA}"
-              fi
+            if grep -R -q -E 'var[[:space:]]]+GitCommit\b' cmd/internal/build; then
+              add_flag "${PKG_BUILD}.GitCommit" "${SHORT_SHA}"
+            elif grep -R -q -E 'var[[:space:]]]+Commit\b' cmd/internal/build; then
+              add_flag "${PKG_BUILD}.Commit" "${SHORT_SHA}"
             fi
-            if grep -R -q -E 'var[[:space:]]+(BuildTime|BuildDate)[[:space:]]+string' cmd/internal/build; then
-              BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-              if grep -R -q -E 'var[[:space:]]+BuildTime[[:space:]]+string' cmd/internal/build; then
-                add_flag "${PKG_BUILD}.BuildTime" "${BUILD_TIME}"
-              else
-                add_flag "${PKG_BUILD}.BuildDate" "${BUILD_TIME}"
-              fi
+            if grep -R -q -E 'var[[:space:]]]+BuildTime\b' cmd/internal/build; then
+              add_flag "${PKG_BUILD}.BuildTime" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            elif grep -R -q -E 'var[[:space:]]]+BuildDate\b' cmd/internal/build; then
+              add_flag "${PKG_BUILD}.BuildDate" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             fi
           fi
           if [ -z "$LDFLAGS_EXTRA" ] && [ -d constant ]; then
-            if grep -R -q -E 'var[[:space:]]+(Version|CoreVersion)[[:space:]]+string' constant; then
-              if grep -R -q -E 'var[[:space:]]+Version[[:space:]]+string' constant; then
-                add_flag "${PKG_CONST}.Version" "${VERSION}"
-              else
-                add_flag "${PKG_CONST}.CoreVersion" "${VERSION}"
-              fi
+            if grep -R -q -E 'var[[:space:]]+Version\b' constant; then
+              add_flag "${PKG_CONST}.Version" "${VERSION}"
             fi
           fi
           echo "LDFLAGS_EXTRA=$LDFLAGS_EXTRA" >> "$GITHUB_ENV"
