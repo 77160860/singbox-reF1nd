@@ -1,6 +1,5 @@
 # .github/workflows/reF1nd.yml
 
-# 工作流名称
 name: Build Minimal sing-box Core
 
 # 触发条件
