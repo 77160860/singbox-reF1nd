@@ -1,5 +1,3 @@
-# .github/workflows/reF1nd.yml
-
 name: Build Minimal sing-box Core
 
 # 触发条件
