@@ -156,7 +156,7 @@ jobs:
           GOOS: linux
           GOARCH: arm64
         run: |
-          go build -v -o "${OUT}" -trimpath -ldflags="-s -w" -tags="with_quic with_utls with_clash_api with_gvisor" ./cmd/sing-box
+          go build -v -o "${OUT}" -trimpath -ldflags="-s -w" -tags="with_quic with_utls with_clash_api" ./cmd/sing-box
       - name: Verify binary architecture
         if: steps.decide.outputs.changed == 'true'
         shell: bash
