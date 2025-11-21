@@ -116,11 +116,17 @@ jobs:
         run: |
           set -e
           VERSION=""
-          # 1) 尝试找到“指向当前提交”的 tag（同时兼容轻量/注解 tag）
-          VERSION=$(git ls-remote --tags "${{ steps.prep.outputs.upstream_repo }}" | awk -v sha="${UPSTREAM_SHA}" '\$1==sha{print \$2}' | sed -E 's|refs/tags/||; s|\^\{\}||' | head -n1)
-          # 2) 若没有精确匹配的 tag，则取仓库最新 v* tag（语义化排序）
+          # 1) 当前提交对应的 tag（兼容轻量/注解 tag）
+          VERSION=$(git ls-remote --tags "${{ steps.prep.outputs.upstream_repo }}" \
+            | awk -v sha="${UPSTREAM_SHA}" '\$1==sha{print \$2}' \
+            | sed -E 's|refs/tags/||; s|\^\{\}||' \
+            | head -n1)
+          # 2) 无精确匹配则取仓库最新 v* tag
           if [ -z "$VERSION" ]; then
-            VERSION=$(git ls-remote --tags "${{ steps.prep.outputs.upstream_repo }}" 'refs/tags/v*' | awk '{print \$2}' | sed -E 's|refs/tags/||; s|\^\{\}||' | sort -V | tail -n1)
+            VERSION=$(git ls-remote --tags "${{ steps.prep.outputs.upstream_repo }}" 'refs/tags/v*' \
+              | awk '{print \$2}' \
+              | sed -E 's|refs/tags/||; s|\^\{\}||' \
+              | sort -V | tail -n1)
           fi
           # 3) 仍未获取到则回退到分支/输入
           if [ -z "$VERSION" ]; then
