@@ -129,7 +129,7 @@ jobs:
         if: steps.decide.outputs.changed == 'true'
         run: |
           VERSION="reF1nd"
-          TAGS="with_quic with_utls with_gvisor with_clash_api"
+          TAGS="with_quic with_utls with_clash_api"
 
           OUT="sing-box-linux-arm64-${VERSION}-${SHORT_SHA}"
           ZIP="${OUT}.zip"
