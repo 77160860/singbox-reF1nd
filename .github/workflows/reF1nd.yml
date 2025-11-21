@@ -158,11 +158,13 @@ jobs:
 
           # 仅在变量存在时注入，避免覆盖源码 const
           if [ -d constant ]; then
-            if grep -R -q -E 'var[[:space:]]+CoreVersion\b' constant; then
-              LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_CONST}.CoreVersion=${VERSION}"
-            fi
+            # 优先注入 constant.Version（官方内核使用）
             if grep -R -q -E 'var[[:space:]]+Version\b' constant; then
               LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_CONST}.Version=${VERSION}"
+            fi
+            # 兼容某些分支使用 CoreVersion
+            if grep -R -q -E 'var[[:space:]]+CoreVersion\b' constant; then
+              LDFLAGS_EXTRA="$LDFLAGS_EXTRA -X ${PKG_CONST}.CoreVersion=${VERSION}"
             fi
           fi
 
@@ -187,6 +189,8 @@ jobs:
             fi
           fi
 
+          # 与本地一致，去除 buildid 便于复现
+          echo 'LDFLAGS_BASE=-s -w -buildid=' >> "$GITHUB_ENV"
           echo "LDFLAGS_EXTRA=${LDFLAGS_EXTRA}" >> "$GITHUB_ENV"
           echo "ldflags=${LDFLAGS_EXTRA}" >> "$GITHUB_OUTPUT"
 
@@ -197,7 +201,7 @@ jobs:
           GOOS: linux
           GOARCH: arm64
         run: |
-          go build -v -o "${OUT}" -trimpath -ldflags="-s -w ${LDFLAGS_EXTRA}" -tags="with_quic with_clash_api" ./cmd/sing-box
+          go build -v -o "${OUT}" -trimpath -ldflags "${LDFLAGS_BASE} ${LDFLAGS_EXTRA}" -tags "with_quic with_clash_api" ./cmd/sing-box
 
       - name: Package zip
         if: steps.decide.outputs.changed == 'true'
