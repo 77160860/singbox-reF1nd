@@ -1,4 +1,4 @@
-name: Build Minimal sing-box Core for Lazy-cache
+name: Build Mini sing-box for Lazy-cache
 
 on:
   workflow_dispatch:
