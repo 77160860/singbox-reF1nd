@@ -124,7 +124,7 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: sing-box minimal (${{ steps.upstream.outputs.short }})
           body: |
-            Source: reF1nd/sing-box @ ${{ steps.upstream.outputs.short }}
+            Source: reF1nd/sing-box @ ${{ env.VERSION }}
             GOOS/GOARCH: linux/arm64
             Tags: ${{ steps.meta.outputs.tags }}
           prerelease: true
