@@ -1,5 +1,4 @@
 name: Build Mini sing-box Core
-
 on:
   workflow_dispatch:
     inputs:
@@ -8,30 +7,21 @@ on:
         type: string
         required: false
         default: 'reF1nd-main'
-      build_version:
-        description: 'Version string to embed (constant.Version) [required]'
-        type: string
-        required: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
       - name: Prepare context
         id: prep
         run: |
           UPSTREAM_REPO="https://github.com/reF1nd/sing-box.git"
           REF="${{ github.event.inputs.version }}"
-          VERSION="${{ github.event.inputs.build_version }}"
-
           echo "REF=$REF" >> $GITHUB_ENV
           echo "UPSTREAM_REPO=$UPSTREAM_REPO" >> $GITHUB_ENV
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "ref=$REF" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "upstream=$UPSTREAM_REPO" >> $GITHUB_OUTPUT
 
       - name: Resolve SHA (tag/branch/commit)
@@ -67,6 +57,13 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Get version from repo
+        id: get_version
+        run: |
+          VERSION=$(go run ./cmd/internal/read_tag)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Define build metadata
         id: meta
         run: |
@@ -74,12 +71,10 @@ jobs:
           OUT="sing-box-linux-arm64-${VERSION}-${SHORT_SHA}"
           ZIP="${OUT}.zip"
           TAG="sing-box-${VERSION}-${SHORT_SHA}"
-
           echo "TAGS=$TAGS" >> $GITHUB_ENV
           echo "OUT=$OUT" >> $GITHUB_ENV
           echo "ZIP=$ZIP" >> $GITHUB_ENV
           echo "TAG=$TAG" >> $GITHUB_ENV
-
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
           echo "out=$OUT" >> $GITHUB_OUTPUT
           echo "zip=$ZIP" >> $GITHUB_OUTPUT
