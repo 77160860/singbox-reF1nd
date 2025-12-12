@@ -70,7 +70,9 @@ jobs:
       - name: Define build metadata
         id: meta
         run: |
-          TAGS="with_quic with_utls with_clash_api"
+          # Tags per-OS
+          TAGS_LINUX="with_quic with_utls with_clash_api"
+          TAGS_WIN64="with_quic with_utls with_clash_api with_purego"
 
           # linux/arm64
           OUT_LINUX="sing-box-linux-arm64-${VERSION}-${SHORT_SHA}"
@@ -82,14 +84,16 @@ jobs:
 
           TAG="sing-box-${VERSION}-${SHORT_SHA}"
 
-          echo "TAGS=$TAGS" >> $GITHUB_ENV
+          echo "TAGS_LINUX=$TAGS_LINUX" >> $GITHUB_ENV
+          echo "TAGS_WIN64=$TAGS_WIN64" >> $GITHUB_ENV
           echo "OUT_LINUX=$OUT_LINUX" >> $GITHUB_ENV
           echo "ZIP_LINUX=$ZIP_LINUX" >> $GITHUB_ENV
           echo "OUT_WIN64=$OUT_WIN64" >> $GITHUB_ENV
           echo "ZIP_WIN64=$ZIP_WIN64" >> $GITHUB_ENV
           echo "TAG=$TAG" >> $GITHUB_ENV
 
-          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+          echo "tags_linux=$TAGS_LINUX" >> $GITHUB_OUTPUT
+          echo "tags_win64=$TAGS_WIN64" >> $GITHUB_OUTPUT
           echo "out_linux=$OUT_LINUX" >> $GITHUB_OUTPUT
           echo "zip_linux=$ZIP_LINUX" >> $GITHUB_OUTPUT
           echo "out_win64=$OUT_WIN64" >> $GITHUB_OUTPUT
@@ -106,12 +110,12 @@ jobs:
             -trimpath \
             -o "${OUT_LINUX}" \
             -ldflags="-s -w -X github.com/sagernet/sing-box/constant.Version=${VERSION}" \
-            -tags="${TAGS}" \
+            -tags="${TAGS_LINUX}" \
             ./cmd/sing-box
 
       - name: Build sing-box (windows amd64 minimal)
         env:
-          CGO_ENABLED: 0
+          CGO_ENABLED: 0 # Windows build must disable CGO
           GOOS: windows
           GOARCH: amd64
         run: |
@@ -119,7 +123,7 @@ jobs:
             -trimpath \
             -o "${OUT_WIN64}" \
             -ldflags="-s -w -X github.com/sagernet/sing-box/constant.Version=${VERSION}" \
-            -tags="${TAGS}" \
+            -tags="${TAGS_WIN64}" \
             ./cmd/sing-box
 
       - name: Verify arch
@@ -162,7 +166,9 @@ jobs:
           body: |
             Source: reF1nd/sing-box @ ${{ env.VERSION }}
             GOOS/GOARCH: linux/arm64, windows/amd64
-            Tags: ${{ steps.meta.outputs.tags }}
+            Tags:
+              linux: ${{ steps.meta.outputs.tags_linux }}
+              windows: ${{ steps.meta.outputs.tags_win64 }}
           prerelease: true
           files: |
             ${{ steps.meta.outputs.zip_linux }}
