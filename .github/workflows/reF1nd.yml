@@ -73,8 +73,8 @@ jobs:
           TAGS="with_quic with_utls with_clash_api"
 
           # linux/arm64
-          OUT="sing-box-linux-arm64-${VERSION}-${SHORT_SHA}"
-          ZIP="${OUT}.zip"
+          OUT_LINUX="sing-box-linux-arm64-${VERSION}-${SHORT_SHA}"
+          ZIP_LINUX="${OUT_LINUX}.zip"
 
           # windows/amd64
           OUT_WIN64="sing-box-windows-amd64-${VERSION}-${SHORT_SHA}.exe"
@@ -83,15 +83,15 @@ jobs:
           TAG="sing-box-${VERSION}-${SHORT_SHA}"
 
           echo "TAGS=$TAGS" >> $GITHUB_ENV
-          echo "OUT=$OUT" >> $GITHUB_ENV
-          echo "ZIP=$ZIP" >> $GITHUB_ENV
+          echo "OUT_LINUX=$OUT_LINUX" >> $GITHUB_ENV
+          echo "ZIP_LINUX=$ZIP_LINUX" >> $GITHUB_ENV
           echo "OUT_WIN64=$OUT_WIN64" >> $GITHUB_ENV
           echo "ZIP_WIN64=$ZIP_WIN64" >> $GITHUB_ENV
           echo "TAG=$TAG" >> $GITHUB_ENV
 
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
-          echo "out=$OUT" >> $GITHUB_OUTPUT
-          echo "zip=$ZIP" >> $GITHUB_OUTPUT
+          echo "out_linux=$OUT_LINUX" >> $GITHUB_OUTPUT
+          echo "zip_linux=$ZIP_LINUX" >> $GITHUB_OUTPUT
           echo "out_win64=$OUT_WIN64" >> $GITHUB_OUTPUT
           echo "zip_win64=$ZIP_WIN64" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
@@ -104,7 +104,7 @@ jobs:
         run: |
           go build \
             -trimpath \
-            -o "${OUT}" \
+            -o "${OUT_LINUX}" \
             -ldflags="-s -w -X github.com/sagernet/sing-box/constant.Version=${VERSION}" \
             -tags="${TAGS}" \
             ./cmd/sing-box
@@ -124,17 +124,17 @@ jobs:
 
       - name: Verify arch
         run: |
-          file "${OUT}" || true
+          file "${OUT_LINUX}" || true
           file "${OUT_WIN64}" || true
-          ls -lh "${OUT}" "${OUT_WIN64}"
+          ls -lh "${OUT_LINUX}" "${OUT_WIN64}"
 
       - name: Package zip (linux)
         run: |
           set -euo pipefail
-          test -f "${OUT}"
-          cp -f "${OUT}" sing-box
-          zip -9 -j "${ZIP}" sing-box
-          ls -lh "${ZIP}"
+          test -f "${OUT_LINUX}"
+          cp -f "${OUT_LINUX}" sing-box
+          zip -9 -j "${ZIP_LINUX}" sing-box
+          ls -lh "${ZIP_LINUX}"
           rm -f sing-box
 
       - name: Package zip (windows amd64)
@@ -148,7 +148,7 @@ jobs:
 
       - name: SHA256
         run: |
-          sha256sum "${ZIP}" > "${ZIP}.sha256"
+          sha256sum "${ZIP_LINUX}" > "${ZIP_LINUX}.sha256"
           sha256sum "${ZIP_WIN64}" > "${ZIP_WIN64}.sha256"
 
       - name: Upload artifact
@@ -156,8 +156,8 @@ jobs:
         with:
           name: sing-box-minimal-arm64-${{ steps.upstream.outputs.short }}
           path: |
-            ${{ steps.meta.outputs.zip }}
-            ${{ steps.meta.outputs.zip }}.sha256
+            ${{ steps.meta.outputs.zip_linux }}
+            ${{ steps.meta.outputs.zip_linux }}.sha256
             ${{ steps.meta.outputs.zip_win64 }}
             ${{ steps.meta.outputs.zip_win64 }}.sha256
 
@@ -172,7 +172,7 @@ jobs:
             Tags: ${{ steps.meta.outputs.tags }}
           prerelease: true
           files: |
-            ${{ steps.meta.outputs.zip }}
-            ${{ steps.meta.outputs.zip }}.sha256
+            ${{ steps.meta.outputs.zip_linux }}
+            ${{ steps.meta.outputs.zip_linux }}.sha256
             ${{ steps.meta.outputs.zip_win64 }}
             ${{ steps.meta.outputs.zip_win64 }}.sha256
