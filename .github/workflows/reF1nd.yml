@@ -146,20 +146,13 @@ jobs:
           ls -lh "${ZIP_WIN64}"
           rm -f sing-box.exe
 
-      - name: SHA256
-        run: |
-          sha256sum "${ZIP_LINUX}" > "${ZIP_LINUX}.sha256"
-          sha256sum "${ZIP_WIN64}" > "${ZIP_WIN64}.sha256"
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: sing-box-minimal-arm64-${{ steps.upstream.outputs.short }}
           path: |
             ${{ steps.meta.outputs.zip_linux }}
-            ${{ steps.meta.outputs.zip_linux }}.sha256
             ${{ steps.meta.outputs.zip_win64 }}
-            ${{ steps.meta.outputs.zip_win64 }}.sha256
 
       - name: Release
         uses: softprops/action-gh-release@v2
@@ -173,6 +166,4 @@ jobs:
           prerelease: true
           files: |
             ${{ steps.meta.outputs.zip_linux }}
-            ${{ steps.meta.outputs.zip_linux }}.sha256
             ${{ steps.meta.outputs.zip_win64 }}
-            ${{ steps.meta.outputs.zip_win64 }}.sha256
