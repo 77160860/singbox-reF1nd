@@ -124,19 +124,26 @@ jobs:
 
       - name: Verify arch
         run: |
-          file "${OUT}"
-          file "${OUT_WIN64}"
+          file "${OUT}" || true
+          file "${OUT_WIN64}" || true
+          ls -lh "${OUT}" "${OUT_WIN64}"
 
       - name: Package zip (linux)
         run: |
-          install -m 0755 "${OUT}" sing-box
+          set -euo pipefail
+          test -f "${OUT}"
+          cp -f "${OUT}" sing-box
           zip -9 -j "${ZIP}" sing-box
+          ls -lh "${ZIP}"
           rm -f sing-box
 
       - name: Package zip (windows amd64)
         run: |
-          install -m 0755 "${OUT_WIN64}" sing-box.exe
+          set -euo pipefail
+          test -f "${OUT_WIN64}"
+          cp -f "${OUT_WIN64}" sing-box.exe
           zip -9 -j "${ZIP_WIN64}" sing-box.exe
+          ls -lh "${ZIP_WIN64}"
           rm -f sing-box.exe
 
       - name: SHA256
